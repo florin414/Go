@@ -6,7 +6,7 @@
 ## 1. MVP Features (Beginner-Friendly Go Implementation)
 
 ### 1.1 Producer
-- [ ] Connect to Kafka brokers
+- [x] Connect to Kafka brokers
 - [ ] Publish messages to a topic
 - [ ] At-least-once delivery
 - [ ] Maintain order per partition
