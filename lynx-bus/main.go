@@ -33,7 +33,6 @@ func main() {
 	}
 
 	p, err := broker.NewProducer(cfg)
-
 	if err != nil {
 		log.Fatalf("failed to create producer: %v", err)
 	}

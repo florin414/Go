@@ -1,13 +1,13 @@
 #!/bin/sh
-# scripts/pre-commit
-# Comprehensive pre-commit hook: formatting, linting, static analysis, tests, and module tidy.
-# Skips: set SKIP_PRE_COMMIT=1 or CI=1 to bypass the entire script.
-# Partial skips: set SKIP_LINT=1 to skip linting; set SKIP_TESTS=1 to skip running tests.
-#!/bin/sh
 # Auto-installing pre-commit hook for Go projects.
+# Skips: set SKIP_PRE_COMMIT=1 or CI=1 to bypass the hook
+# Partial skips: SKIP_LINT=1, SKIP_TESTS=1
+
 set -e
 
-# Skip whole hook
+# -----------------------
+# Skip hook entirely
+# -----------------------
 if [ -n "$SKIP_PRE_COMMIT" ] || [ -n "$CI" ]; then
   echo "[pre-commit] skipping (SKIP_PRE_COMMIT or CI set)"
   exit 0
@@ -16,9 +16,9 @@ fi
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
-###############################################################################
+# -----------------------
 # Helper: install Go tool if missing
-###############################################################################
+# -----------------------
 install_go_tool() {
   name="$1"
   pkg="$2"
@@ -33,7 +33,7 @@ install_go_tool() {
     exit 1
   fi
 
-  # GOPATH/bin must be added
+  # Add GOPATH/bin to PATH for current session
   export PATH="$(go env GOPATH)/bin:$PATH"
 
   if ! command -v "$name" >/dev/null 2>&1; then
@@ -42,19 +42,17 @@ install_go_tool() {
   fi
 }
 
-###############################################################################
-# INSTALL missing tools
-###############################################################################
+# -----------------------
+# Install missing tools
+# -----------------------
 install_go_tool gofumpt      mvdan.cc/gofumpt@latest
 install_go_tool goimports    golang.org/x/tools/cmd/goimports@latest
 install_go_tool staticcheck  honnef.co/go/tools/cmd/staticcheck@latest
 
-# golangci-lint cannot be installed via go install → custom installer
 if [ -z "$SKIP_LINT" ] && ! command -v golangci-lint >/dev/null 2>&1; then
   echo "[pre-commit] golangci-lint missing → installing"
   curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
     | sh -s -- -b "$(go env GOPATH)/bin" latest
-
   export PATH="$(go env GOPATH)/bin:$PATH"
 
   if ! command -v golangci-lint >/dev/null 2>&1; then
@@ -63,10 +61,10 @@ if [ -z "$SKIP_LINT" ] && ! command -v golangci-lint >/dev/null 2>&1; then
   fi
 fi
 
-###############################################################################
+# -----------------------
 # Formatting
-###############################################################################
-echo "[pre-commit] formatting: gofumpt → goimports"
+# -----------------------
+echo "[pre-commit] formatting: gofumpt -> goimports"
 gofumpt -w .
 goimports -w .
 
@@ -77,39 +75,42 @@ if ! git diff --quiet --; then
   exit 1
 fi
 
-###############################################################################
+# -----------------------
 # Lint
-###############################################################################
+# -----------------------
 if [ -z "$SKIP_LINT" ]; then
   echo "[pre-commit] running golangci-lint"
   golangci-lint run ./...
 fi
 
-###############################################################################
+# -----------------------
 # Static analysis
-###############################################################################
+# -----------------------
 echo "[pre-commit] running staticcheck"
 staticcheck ./...
 
 echo "[pre-commit] running go vet"
 go vet ./...
 
-###############################################################################
+# -----------------------
 # Tests
-###############################################################################
+# -----------------------
 if [ -z "$SKIP_TESTS" ]; then
   echo "[pre-commit] running tests"
-  go test ./...
+  if ! go test ./...; then
+    echo "ERROR: tests failed. Fix them before committing."
+    exit 1
+  fi
 fi
 
-###############################################################################
+# -----------------------
 # Module tidy
-###############################################################################
+# -----------------------
 echo "[pre-commit] running go mod tidy"
 go mod tidy
 
 if ! git diff --quiet -- go.mod go.sum; then
-  echo "go mod tidy changed files:"
+  echo "go mod tidy modified go.mod or go.sum:"
   git --no-pager diff --name-only -- go.mod go.sum
   echo "Please git add the changes and commit again."
   exit 1
