@@ -1,0 +1,93 @@
+#!/bin/sh
+# scripts/pre-commit
+# Comprehensive pre-commit hook: formatting, linting, static analysis, tests, and module tidy.
+# Skips: set SKIP_PRE_COMMIT=1 or CI=1 to bypass the entire script.
+# Partial skips: set SKIP_LINT=1 to skip linting; set SKIP_TESTS=1 to skip running tests.
+
+set -e
+
+if [ -n "$SKIP_PRE_COMMIT" ] || [ -n "$CI" ]; then
+  echo "Skipping pre-commit checks (SKIP_PRE_COMMIT or CI set)"
+  exit 0
+fi
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+echo "[pre-commit] running formatting: gofumpt -> goimports"
+# require formatters
+if ! command -v gofumpt >/dev/null 2>&1; then
+  echo "gofumpt not found. Install (go install mvdan.cc/gofumpt@latest) or set SKIP_PRE_COMMIT=1 to bypass."
+  exit 1
+fi
+if ! command -v goimports >/dev/null 2>&1; then
+  echo "goimports not found. Install (go install golang.org/x/tools/cmd/goimports@latest) or set SKIP_PRE_COMMIT=1 to bypass."
+  exit 1
+fi
+
+# apply formatting (write changes)
+# gofumpt is stricter/faster; run it first then goimports to fix imports
+gofumpt -w .
+# goimports may modify files; run it after gofumpt
+goimports -w .
+
+# if formatters changed files, tell user to review and add
+if ! git diff --quiet --; then
+  echo "Formatting modified files. Please review and 'git add' the changes before committing."
+  git --no-pager diff --name-only
+  exit 1
+fi
+
+# Linting (golangci-lint) - optional via SKIP_LINT
+if [ -z "$SKIP_LINT" ]; then
+  echo "[pre-commit] running golangci-lint"
+  if ! command -v golangci-lint >/dev/null 2>&1; then
+    echo "golangci-lint not found. Install (https://golangci-lint.run/usage/install/) or set SKIP_LINT=1 to skip."
+    exit 1
+  fi
+  # run fastest checks first via default config; returns non-zero on issues
+  golangci-lint run ./...
+else
+  echo "[pre-commit] skipping golangci-lint (SKIP_LINT set)"
+fi
+
+# Static analysis: staticcheck
+echo "[pre-commit] running staticcheck"
+if ! command -v staticcheck >/dev/null 2>&1; then
+  echo "staticcheck not found. Install (go install honnef.co/go/tools/cmd/staticcheck@latest) or set SKIP_PRE_COMMIT=1 to bypass."
+  exit 1
+fi
+staticcheck ./...
+
+# go vet
+echo "[pre-commit] running go vet"
+go vet ./...
+
+# tests (optional via SKIP_TESTS)
+if [ -z "$SKIP_TESTS" ]; then
+  echo "[pre-commit] running go test ./..."
+  if ! go test ./...; then
+    echo "Commit aborted: tests failed. Fix tests before committing."
+    exit 1
+  fi
+else
+  echo "[pre-commit] skipping tests (SKIP_TESTS set)"
+fi
+
+# tidy modules and fail if it changed go.mod/go.sum so user can review
+echo "[pre-commit] running go mod tidy"
+if ! command -v go >/dev/null 2>&1; then
+  echo "go binary not found in PATH"
+  exit 1
+fi
+# run tidy
+go mod tidy
+# check for changes in go.mod/go.sum
+if ! git diff --quiet -- go.mod go.sum; then
+  echo "go mod tidy modified go.mod or go.sum. Please review and 'git add' the changes before committing."
+  git --no-pager diff --name-only -- go.mod go.sum
+  exit 1
+fi
+
+echo "[pre-commit] all checks passed"
+exit 0

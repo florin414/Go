@@ -1,11 +1,8 @@
 package broker
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -85,7 +82,8 @@ func NewProducer(cfg ProducerConfig) (*Producer, error) {
 	}
 
 	// Perform a lightweight Kafka protocol check (ApiVersionsRequest v0) on the TCP-reachable brokers
-	// to ensure the peer speaks Kafka and responds correctly.
+	// to ensure the peer speaks Kafka and responds correctly. The actual checkApiVersions
+	// implementation lives in api_versions.go.
 	var kafkaSpeakers []string
 	for _, addr := range tcpReachable {
 		// compute remaining time from context deadline for per-broker check
@@ -112,110 +110,3 @@ func NewProducer(cfg ProducerConfig) (*Producer, error) {
 
 	return p, nil
 }
-
-// checkApiVersions performs a minimal ApiVersionsRequest (version 0) to verify the
-// peer speaks the Kafka protocol. It sends a request with correlation id 1 and
-// ensures the response contains the same correlation id. This is implemented
-// from scratch: framing + request header encoding using big-endian integers.
-func checkApiVersions(addr string, timeout time.Duration) error {
-	// ApiVersions API key is 18, version 0 has no request body.
-	const apiKey int16 = 18
-	const apiVersion int16 = 0
-	const correlationId int32 = 1
-	clientID := "lynxbus"
-
-	buf := &bytes.Buffer{}
-	// request header: apiKey(int16), apiVersion(int16), correlationId(int32), clientId(string)
-	if err := binary.Write(buf, binary.BigEndian, apiKey); err != nil {
-		return err
-	}
-	if err := binary.Write(buf, binary.BigEndian, apiVersion); err != nil {
-		return err
-	}
-	if err := binary.Write(buf, binary.BigEndian, correlationId); err != nil {
-		return err
-	}
-	if err := binary.Write(buf, binary.BigEndian, int16(len(clientID))); err != nil {
-		return err
-	}
-	if _, err := buf.WriteString(clientID); err != nil {
-		return err
-	}
-
-	payload := buf.Bytes()
-	// prepend length (int32)
-	out := &bytes.Buffer{}
-	if err := binary.Write(out, binary.BigEndian, int32(len(payload))); err != nil {
-		return err
-	}
-	if _, err := out.Write(payload); err != nil {
-		return err
-	}
-
-	conn, err := net.DialTimeout("tcp", addr, timeout)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close() }()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
-
-	if _, err := conn.Write(out.Bytes()); err != nil {
-		return err
-	}
-
-	// read response length
-	var respLen int32
-	if err := binary.Read(conn, binary.BigEndian, &respLen); err != nil {
-		return err
-	}
-	if respLen < 4 {
-		return fmt.Errorf("invalid response length %d", respLen)
-	}
-
-	resp := make([]byte, respLen)
-	if _, err := io.ReadFull(conn, resp); err != nil {
-		return err
-	}
-
-	// correlation id is the first 4 bytes of the response
-	respCorr := int32(binary.BigEndian.Uint32(resp[0:4]))
-	if respCorr != correlationId {
-		return fmt.Errorf("correlation id mismatch: got %d expected %d", respCorr, correlationId)
-	}
-	// success
-	return nil
-}
-
-// Reachable returns the list of brokers that were reachable during the last check.
-func (p *Producer) Reachable() []string {
-	if p == nil {
-		return nil
-	}
-	p.reachableMu.RLock()
-	defer p.reachableMu.RUnlock()
-	out := make([]string, len(p.reachable))
-	copy(out, p.reachable)
-	return out
-}
-
-// IsConnected reports whether at least one broker was reachable.
-func (p *Producer) IsConnected() bool {
-	if p == nil {
-		return false
-	}
-	p.reachableMu.RLock()
-	defer p.reachableMu.RUnlock()
-	return len(p.reachable) > 0
-}
-
-// Publish is a placeholder for future implementation. It will be implemented
-// to speak the Kafka protocol from scratch in later steps of the MVP.
-func (p *Producer) Publish(key, value []byte) error {
-	// reference parameters to avoid unused parameter warnings until implemented
-	_ = key
-	_ = value
-	return fmt.Errorf("Publish not implemented: producer currently only verifies broker connectivity")
-}
-
-// Close is a no-op for the current minimal implementation.
-func (p *Producer) Close() error { return nil }

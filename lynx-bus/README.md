@@ -7,7 +7,7 @@
 
 ### 1.1 Producer
 - [x] Connect to Kafka brokers
-- [ ] Publish messages to a topic
+- [x] Publish messages to a topic
 - [ ] At-least-once delivery
 - [ ] Maintain order per partition
 - [ ] Retry on temporary failure

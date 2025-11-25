@@ -16,7 +16,7 @@ func TestNewProducer_GivenValidBroker_WhenConnecting_ThenShouldSucceed(t *testin
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}
-	defer p.Close()
+	defer func() { _ = p.Close() }()
 
 	if !p.IsConnected() {
 		t.Fatalf("expected connected")
@@ -64,7 +64,7 @@ func TestNewProducer_GivenMixedBrokers_WhenOneIsValid_ThenShouldSucceed(t *testi
 	if err != nil {
 		t.Fatalf("expected success when one broker speaks Kafka, got error: %v", err)
 	}
-	defer p.Close()
+	defer func() { _ = p.Close() }()
 
 	if !p.IsConnected() {
 		t.Fatalf("expected connected")
