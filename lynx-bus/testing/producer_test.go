@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"LynxBus/internal/broker"
+	"github.com/florin/lynx-bus/internal/broker"
 )
 
 func TestNewProducer_GivenValidBroker_WhenConnecting_ThenShouldSucceed(t *testing.T) {

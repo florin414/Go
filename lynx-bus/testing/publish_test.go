@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"LynxBus/internal/broker"
+	"github.com/florin/lynx-bus/internal/broker"
 )
 
 func TestPublish_GivenValidBroker_WhenPublishing_ThenSucceeds(t *testing.T) {

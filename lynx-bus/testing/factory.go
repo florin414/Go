@@ -3,7 +3,7 @@ package testing
 import (
 	"time"
 
-	"LynxBus/internal/broker"
+	"github.com/florin/lynx-bus/internal/broker"
 )
 
 // NewProducerConfig constructs a ProducerConfig for tests using provided values.

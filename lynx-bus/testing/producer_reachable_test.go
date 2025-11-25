@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"LynxBus/internal/broker"
+	"github.com/florin/lynx-bus/internal/broker"
 )
 
 func TestProducer_GivenNilReceiver_WhenAccessingState_ThenBehavesSafely(t *testing.T) {

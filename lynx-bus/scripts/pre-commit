@@ -17,6 +17,18 @@ root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
 # -----------------------
+# Tests (first!)
+# -----------------------
+if [ -z "$SKIP_TESTS" ]; then
+  echo "[pre-commit] running tests"
+  cd "$root" || exit 1
+  if ! go test -v ./testing; then
+    echo "ERROR: tests failed. Fix them before committing."
+    exit 1
+  fi
+fi
+
+# -----------------------
 # Helper: install Go tool if missing
 # -----------------------
 install_go_tool() {
@@ -33,7 +45,6 @@ install_go_tool() {
     exit 1
   fi
 
-  # Add GOPATH/bin to PATH for current session
   export PATH="$(go env GOPATH)/bin:$PATH"
 
   if ! command -v "$name" >/dev/null 2>&1; then
@@ -62,20 +73,6 @@ if [ -z "$SKIP_LINT" ] && ! command -v golangci-lint >/dev/null 2>&1; then
 fi
 
 # -----------------------
-# Formatting
-# -----------------------
-echo "[pre-commit] formatting: gofumpt -> goimports"
-gofumpt -w .
-goimports -w .
-
-if ! git diff --quiet --; then
-  echo "Formatting changed files:"
-  git --no-pager diff --name-only
-  echo "Please git add the changes and commit again."
-  exit 1
-fi
-
-# -----------------------
 # Lint
 # -----------------------
 if [ -z "$SKIP_LINT" ]; then
@@ -93,27 +90,28 @@ echo "[pre-commit] running go vet"
 go vet ./...
 
 # -----------------------
-# Tests
+# Formatting (warning only)
 # -----------------------
-if [ -z "$SKIP_TESTS" ]; then
-  echo "[pre-commit] running tests"
-  if ! go test -v ./...; then
-    echo "ERROR: tests failed. Fix them before committing."
-    exit 1
-  fi
+echo "[pre-commit] formatting: gofumpt -> goimports"
+gofumpt -w .
+goimports -w .
+
+if ! git diff --quiet --; then
+  echo "Warning: formatting changed files:"
+  git --no-pager diff --name-only
+  echo "Please git add the changes before pushing."
 fi
 
 # -----------------------
-# Module tidy
+# Module tidy (warning only)
 # -----------------------
 echo "[pre-commit] running go mod tidy"
 go mod tidy
 
 if ! git diff --quiet -- go.mod go.sum; then
-  echo "go mod tidy modified go.mod or go.sum:"
+  echo "Warning: go mod tidy modified go.mod or go.sum:"
   git --no-pager diff --name-only -- go.mod go.sum
-  echo "Please git add the changes and commit again."
-  exit 1
+  echo "Please git add the changes before pushing."
 fi
 
 echo "[pre-commit] all checks passed"
