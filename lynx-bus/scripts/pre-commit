@@ -3,89 +3,115 @@
 # Comprehensive pre-commit hook: formatting, linting, static analysis, tests, and module tidy.
 # Skips: set SKIP_PRE_COMMIT=1 or CI=1 to bypass the entire script.
 # Partial skips: set SKIP_LINT=1 to skip linting; set SKIP_TESTS=1 to skip running tests.
-
+#!/bin/sh
+# Auto-installing pre-commit hook for Go projects.
 set -e
 
+# Skip whole hook
 if [ -n "$SKIP_PRE_COMMIT" ] || [ -n "$CI" ]; then
-  echo "Skipping pre-commit checks (SKIP_PRE_COMMIT or CI set)"
+  echo "[pre-commit] skipping (SKIP_PRE_COMMIT or CI set)"
   exit 0
 fi
 
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
-echo "[pre-commit] running formatting: gofumpt -> goimports"
-# require formatters
-if ! command -v gofumpt >/dev/null 2>&1; then
-  echo "gofumpt not found. Install (go install mvdan.cc/gofumpt@latest) or set SKIP_PRE_COMMIT=1 to bypass."
-  exit 1
-fi
-if ! command -v goimports >/dev/null 2>&1; then
-  echo "goimports not found. Install (go install golang.org/x/tools/cmd/goimports@latest) or set SKIP_PRE_COMMIT=1 to bypass."
-  exit 1
-fi
+###############################################################################
+# Helper: install Go tool if missing
+###############################################################################
+install_go_tool() {
+  name="$1"
+  pkg="$2"
 
-# apply formatting (write changes)
-# gofumpt is stricter/faster; run it first then goimports to fix imports
-gofumpt -w .
-# goimports may modify files; run it after gofumpt
-goimports -w .
+  if command -v "$name" >/dev/null 2>&1; then
+    return 0
+  fi
 
-# if formatters changed files, tell user to review and add
-if ! git diff --quiet --; then
-  echo "Formatting modified files. Please review and 'git add' the changes before committing."
-  git --no-pager diff --name-only
-  exit 1
-fi
-
-# Linting (golangci-lint) - optional via SKIP_LINT
-if [ -z "$SKIP_LINT" ]; then
-  echo "[pre-commit] running golangci-lint"
-  if ! command -v golangci-lint >/dev/null 2>&1; then
-    echo "golangci-lint not found. Install (https://golangci-lint.run/usage/install/) or set SKIP_LINT=1 to skip."
+  echo "[pre-commit] $name missing → installing ($pkg)"
+  if ! go install "$pkg"; then
+    echo "ERROR: failed to install $name ($pkg). Aborting commit."
     exit 1
   fi
-  # run fastest checks first via default config; returns non-zero on issues
-  golangci-lint run ./...
-else
-  echo "[pre-commit] skipping golangci-lint (SKIP_LINT set)"
+
+  # GOPATH/bin must be added
+  export PATH="$(go env GOPATH)/bin:$PATH"
+
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "ERROR: $name still not found after installation. Check PATH."
+    exit 1
+  fi
+}
+
+###############################################################################
+# INSTALL missing tools
+###############################################################################
+install_go_tool gofumpt      mvdan.cc/gofumpt@latest
+install_go_tool goimports    golang.org/x/tools/cmd/goimports@latest
+install_go_tool staticcheck  honnef.co/go/tools/cmd/staticcheck@latest
+
+# golangci-lint cannot be installed via go install → custom installer
+if [ -z "$SKIP_LINT" ] && ! command -v golangci-lint >/dev/null 2>&1; then
+  echo "[pre-commit] golangci-lint missing → installing"
+  curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+    | sh -s -- -b "$(go env GOPATH)/bin" latest
+
+  export PATH="$(go env GOPATH)/bin:$PATH"
+
+  if ! command -v golangci-lint >/dev/null 2>&1; then
+    echo "ERROR: failed to install golangci-lint. Aborting commit."
+    exit 1
+  fi
 fi
 
-# Static analysis: staticcheck
-echo "[pre-commit] running staticcheck"
-if ! command -v staticcheck >/dev/null 2>&1; then
-  echo "staticcheck not found. Install (go install honnef.co/go/tools/cmd/staticcheck@latest) or set SKIP_PRE_COMMIT=1 to bypass."
+###############################################################################
+# Formatting
+###############################################################################
+echo "[pre-commit] formatting: gofumpt → goimports"
+gofumpt -w .
+goimports -w .
+
+if ! git diff --quiet --; then
+  echo "Formatting changed files:"
+  git --no-pager diff --name-only
+  echo "Please git add the changes and commit again."
   exit 1
 fi
+
+###############################################################################
+# Lint
+###############################################################################
+if [ -z "$SKIP_LINT" ]; then
+  echo "[pre-commit] running golangci-lint"
+  golangci-lint run ./...
+fi
+
+###############################################################################
+# Static analysis
+###############################################################################
+echo "[pre-commit] running staticcheck"
 staticcheck ./...
 
-# go vet
 echo "[pre-commit] running go vet"
 go vet ./...
 
-# tests (optional via SKIP_TESTS)
+###############################################################################
+# Tests
+###############################################################################
 if [ -z "$SKIP_TESTS" ]; then
-  echo "[pre-commit] running go test ./..."
-  if ! go test ./...; then
-    echo "Commit aborted: tests failed. Fix tests before committing."
-    exit 1
-  fi
-else
-  echo "[pre-commit] skipping tests (SKIP_TESTS set)"
+  echo "[pre-commit] running tests"
+  go test ./...
 fi
 
-# tidy modules and fail if it changed go.mod/go.sum so user can review
+###############################################################################
+# Module tidy
+###############################################################################
 echo "[pre-commit] running go mod tidy"
-if ! command -v go >/dev/null 2>&1; then
-  echo "go binary not found in PATH"
-  exit 1
-fi
-# run tidy
 go mod tidy
-# check for changes in go.mod/go.sum
+
 if ! git diff --quiet -- go.mod go.sum; then
-  echo "go mod tidy modified go.mod or go.sum. Please review and 'git add' the changes before committing."
+  echo "go mod tidy changed files:"
   git --no-pager diff --name-only -- go.mod go.sum
+  echo "Please git add the changes and commit again."
   exit 1
 fi
 
