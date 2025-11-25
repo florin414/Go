@@ -97,7 +97,7 @@ go vet ./...
 # -----------------------
 if [ -z "$SKIP_TESTS" ]; then
   echo "[pre-commit] running tests"
-  if ! go test ./...; then
+  if ! go test -v ./...; then
     echo "ERROR: tests failed. Fix them before committing."
     exit 1
   fi
