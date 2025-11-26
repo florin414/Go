@@ -65,6 +65,7 @@ func NewProducer(cfg ProducerConfig) (*Producer, error) {
 	}
 
 	var tcpReachable []string
+Loop:
 	for i := 0; i < len(cfg.Brokers); i++ {
 		select {
 		case res := <-ch:
@@ -73,7 +74,7 @@ func NewProducer(cfg ProducerConfig) (*Producer, error) {
 			}
 		case <-ctx.Done():
 			// timeout waiting for remaining brokers
-			break
+			break Loop
 		}
 	}
 
@@ -87,7 +88,7 @@ func NewProducer(cfg ProducerConfig) (*Producer, error) {
 	var kafkaSpeakers []string
 	for _, addr := range tcpReachable {
 		// compute remaining time from context deadline for per-broker check
-		var perTimeout time.Duration = 2 * time.Second
+		perTimeout := 2 * time.Second
 		if dl, ok := ctx.Deadline(); ok {
 			rem := time.Until(dl)
 			if rem < perTimeout && rem > 0 {

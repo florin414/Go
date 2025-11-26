@@ -6,113 +6,139 @@
 set -e
 
 # -----------------------
+# Colors
+# -----------------------
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # no color
+
+warnings=()
+
+# -----------------------
 # Skip hook entirely
 # -----------------------
 if [ -n "$SKIP_PRE_COMMIT" ] || [ -n "$CI" ]; then
-  echo "[pre-commit] skipping (SKIP_PRE_COMMIT or CI set)"
-  exit 0
+    echo -e "${YELLOW}[pre-commit] skipping (SKIP_PRE_COMMIT or CI set)${NC}"
+    exit 0
 fi
 
 root="$(git rev-parse --show-toplevel)"
-cd "$root"
 
 # -----------------------
 # Tests (first!)
 # -----------------------
 if [ -z "$SKIP_TESTS" ]; then
-  echo "[pre-commit] running tests"
-  cd "$root" || exit 1
-  if ! go test -v ./testing; then
-    echo "ERROR: tests failed. Fix them before committing."
-    exit 1
-  fi
+    echo -e "${GREEN}[pre-commit] running tests${NC}"
+    cd "$(dirname "$0")/.." || exit 1
+    if go test -v ./...; then
+        echo -e "${GREEN}✔ Tests passed${NC}"
+    else
+        echo -e "${RED}✖ Tests failed. Fix them before committing.${NC}"
+        exit 1
+    fi
 fi
 
 # -----------------------
 # Helper: install Go tool if missing
 # -----------------------
 install_go_tool() {
-  name="$1"
-  pkg="$2"
+    name="$1"
+    pkg="$2"
 
-  if command -v "$name" >/dev/null 2>&1; then
-    return 0
-  fi
+    if command -v "$name" >/dev/null 2>&1; then
+        return 0
+    fi
 
-  echo "[pre-commit] $name missing → installing ($pkg)"
-  if ! go install "$pkg"; then
-    echo "ERROR: failed to install $name ($pkg). Aborting commit."
-    exit 1
-  fi
+    echo -e "${YELLOW}[pre-commit] $name missing → installing ($pkg)${NC}"
 
-  export PATH="$(go env GOPATH)/bin:$PATH"
+    if ! go install "$pkg"; then
+        echo -e "${RED}ERROR: failed to install $name ($pkg). Aborting commit.${NC}"
+        exit 1
+    fi
 
-  if ! command -v "$name" >/dev/null 2>&1; then
-    echo "ERROR: $name still not found after installation. Check PATH."
-    exit 1
-  fi
+    # Add GOPATH/bin to PATH for the current shell
+    export PATH="$(go env GOPATH)/bin:$PATH"
+
+    if ! command -v "$name" >/dev/null 2>&1; then
+        echo -e "${RED}ERROR: $name still not found after installation. Check PATH.${NC}"
+        exit 1
+    fi
 }
 
 # -----------------------
 # Install missing tools
 # -----------------------
-install_go_tool gofumpt      mvdan.cc/gofumpt@latest
-install_go_tool goimports    golang.org/x/tools/cmd/goimports@latest
-install_go_tool staticcheck  honnef.co/go/tools/cmd/staticcheck@latest
+install_go_tool gofumpt mvdan.cc/gofumpt@latest
+install_go_tool goimports golang.org/x/tools/cmd/goimports@latest
+install_go_tool staticcheck honnef.co/go/tools/cmd/staticcheck@latest
 
 if [ -z "$SKIP_LINT" ] && ! command -v golangci-lint >/dev/null 2>&1; then
-  echo "[pre-commit] golangci-lint missing → installing"
-  curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-    | sh -s -- -b "$(go env GOPATH)/bin" latest
-  export PATH="$(go env GOPATH)/bin:$PATH"
+    echo -e "${YELLOW}[pre-commit] golangci-lint missing → installing${NC}"
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+        | sh -s -- -b "$(go env GOPATH)/bin" latest
 
-  if ! command -v golangci-lint >/dev/null 2>&1; then
-    echo "ERROR: failed to install golangci-lint. Aborting commit."
-    exit 1
-  fi
+    # Add GOPATH/bin to PATH for golangci-lint as well
+    export PATH="$(go env GOPATH)/bin:$PATH"
+
+    if ! command -v golangci-lint >/dev/null 2>&1; then
+        echo -e "${RED}ERROR: failed to install golangci-lint. Aborting commit.${NC}"
+        exit 1
+    fi
 fi
 
 # -----------------------
 # Lint
 # -----------------------
 if [ -z "$SKIP_LINT" ]; then
-  echo "[pre-commit] running golangci-lint"
-  golangci-lint run ./...
+    echo -e "${GREEN}[pre-commit] running golangci-lint${NC}"
+    golangci-lint run ./...
 fi
 
 # -----------------------
 # Static analysis
 # -----------------------
-echo "[pre-commit] running staticcheck"
+echo -e "${GREEN}[pre-commit] running staticcheck${NC}"
 staticcheck ./...
 
-echo "[pre-commit] running go vet"
+echo -e "${GREEN}[pre-commit] running go vet${NC}"
 go vet ./...
 
 # -----------------------
 # Formatting (warning only)
 # -----------------------
-echo "[pre-commit] formatting: gofumpt -> goimports"
+echo -e "${GREEN}[pre-commit] formatting: gofumpt -> goimports${NC}"
 gofumpt -w .
 goimports -w .
 
 if ! git diff --quiet --; then
-  echo "Warning: formatting changed files:"
-  git --no-pager diff --name-only
-  echo "Please git add the changes before pushing."
+    warnings+=("${YELLOW}⚠ Formatting changed files:${NC}")
+    warnings+=("$(git --no-pager diff --name-only)")
 fi
 
 # -----------------------
 # Module tidy (warning only)
 # -----------------------
-echo "[pre-commit] running go mod tidy"
+echo -e "${GREEN}[pre-commit] running go mod tidy${NC}"
 go mod tidy
 
 if ! git diff --quiet -- go.mod go.sum; then
-  echo "Warning: go mod tidy modified go.mod or go.sum:"
-  git --no-pager diff --name-only -- go.mod go.sum
-  echo "Please git add the changes before pushing."
+    warnings+=("${YELLOW}⚠ go.mod or go.sum modified:${NC}")
+    warnings+=("$(git --no-pager diff --name-only -- go.mod go.sum)")
 fi
 
-echo "[pre-commit] all checks passed"
+# -----------------------
+# Print warnings at the end
+# -----------------------
+if [ ${#warnings[@]} -ne 0 ]; then
+    for w in "${warnings[@]}"; do
+        echo -e "$w"
+    done
+    echo -e "${YELLOW}Please git add the changes before pushing.${NC}"
+fi
+
+# -----------------------
+# Success message
+# -----------------------
+echo -e "${GREEN}✔ All checks passed${NC}"
 exit 0
